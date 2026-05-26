@@ -1,6 +1,7 @@
 # Status Tracker Hub: Quantitative UX Retrofit Pipeline
 
-[🌐 **Read the Full UX Case Study & Business Impact on Squarespace**](YOUR_SQUARESPACE_PROJECT_URL_HERE)
+[🌐 **Read the Full UX Case Study & Business Impact on Squarespace**](https://www.lucykanaventi.com/status-tracker-hub-copy-1)
+
 
 ## 📌 Technical Overview
 This repository showcases a quantitative upgrade to a legacy fintech UX research project. Using behavioral analytics and machine learning techniques gained during my Master's in Data Science, I built Python pipelines to evaluate navigation architecture and user interaction patterns. 
