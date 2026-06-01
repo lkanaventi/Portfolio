@@ -1,0 +1,507 @@
+---
+title: "Portfolio Project visuals"
+output: html_notebook
+---
+
+#---------------------------------------------------------------------#AI USAGE CITATION (R STATISTICAL ANALYSIS & VISUALIZATION)
+
+#---------------------------------------------------------------------
+
+#Tool: ChatGPT (OpenAI)
+
+#Usage Scope: Methodological review, statistical interpretation support,
+
+#and visualization refinement.
+
+#Purposes:
+
+#1. Method Selection Validation: Reviewed statistical approach choices
+
+\#(chi-square vs. Fisher’s exact, Kruskal–Wallis for ordinal outcomes,
+
+#Spearman vs. Pearson correlation) to confirm alignment with data
+
+#structure and distributional assumptions.
+
+#2. Model Interpretation Support: Assisted in translating logistic and
+
+#linear regression outputs into practical effect size interpretations
+
+#for business-facing conclusions.
+
+#3. Analytical Consistency Checks: Helped reconcile differences between
+
+#visual trends and inferential test results to ensure accurate
+
+#narrative framing.
+
+#4. Visualization Refinement: Provided feedback on ggplot structure,
+
+#factor ordering, scaling, and clarity of communication.
+
+#Representative Prompts:
+
+#- "Given these variable types, is Kruskal–Wallis more appropriate than ANOVA?"
+
+#- "Help interpret this logistic regression coefficient in terms of odds."
+
+#- "Why does my visualization look stronger than the regression results?"
+
+#- "Does this correlation method align with my data distribution?"
+
+#- "Refine this visualization title to better reflect the statistical findings."
+
+#Verification:
+
+#All statistical tests and models were independently executed in R,
+
+#and conclusions were validated against model summaries and assumption
+
+#diagnostics.
+
+#---------------------------------------------------------------------
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code.
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Cmd+Shift+Enter*.
+
+```{r}
+plot(cars)
+```
+
+Add a new chunk by clicking the *Insert Chunk* button on the toolbar or by pressing *Cmd+Option+I*.
+
+When you save the notebook, an HTML file containing the code and output will be saved alongside it (click the *Preview* button or press *Cmd+Shift+K* to preview the HTML file).
+
+The preview shows you a rendered HTML copy of the contents of the editor. Consequently, unlike *Knit*, *Preview* does not run any R code chunks. Instead, the output of the chunk when it was last run in the editor is displayed.
+
+```{r}
+install.packages("DBI")
+install.packages("RPostgres")   # For PostgreSQL
+
+```
+
+```{r}
+library(DBI)
+library(RPostgres)
+```
+
+```{r}
+con <- dbConnect(
+  RPostgres::Postgres(),
+  dbname = "Database Portfolio Project",
+  host = "localhost",
+  port = 5432,
+  user = "postgres",
+  password = "Hopeformyfuture11!"
+)
+```
+
+```{r}
+dbIsValid(con)
+```
+
+```{r}
+satisfaction_repeat<-dbGetQuery(con, "
+WITH customer_repeat AS (
+    SELECT
+        c.customer_unique_id,
+        CASE WHEN COUNT(o.order_id) > 1 THEN 1 ELSE 0 END AS repeat_customer
+    FROM orders o
+    JOIN customers c
+        ON o.customer_id = c.customer_id
+    GROUP BY c.customer_unique_id
+)
+SELECT
+    orv.review_score,
+    COUNT(DISTINCT c.customer_unique_id) AS total_customers,
+    SUM(cr.repeat_customer) AS repeat_customers,
+    ROUND(SUM(cr.repeat_customer)::numeric 
+          / COUNT(DISTINCT c.customer_unique_id) * 100, 2) AS repeat_rate_percent
+FROM orders o
+JOIN customers c
+    ON o.customer_id = c.customer_id
+JOIN order_reviews orv
+    ON o.order_id = orv.order_id
+JOIN customer_repeat cr
+    ON c.customer_unique_id = cr.customer_unique_id
+GROUP BY orv.review_score
+ORDER BY orv.review_score;
+")
+```
+
+```{r}
+bstates_delay <- dbGetQuery(con, "
+SELECT s.seller_state, AVG(o.order_delivered_customer_date-o.order_estimated_delivery_date) AS avg_delivery_delay
+FROM orders o 
+JOIN order_items ot
+ON o.order_id = ot.order_id
+JOIN sellers s
+ON ot.seller_id = s.seller_id
+WHERE o.order_delivered_customer_date IS NOT NULL
+	AND o.order_estimated_delivery_date IS NOT NULL
+GROUP BY s.seller_state
+ORDER BY avg_delivery_delay DESC;
+")
+```
+
+```{r}
+seller_delay <- dbGetQuery(con,"
+WITH seller_delay AS (
+    SELECT
+        s.seller_id,
+        AVG(EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_estimated_delivery_date)) / 86400) AS avg_delivery_delay_days
+    FROM orders o
+    JOIN order_items ot
+        ON o.order_id = ot.order_id
+    JOIN sellers s
+        ON ot.seller_id = s.seller_id
+    WHERE o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+    GROUP BY s.seller_id
+),
+bucketed_sellers AS (
+    SELECT
+        seller_id,
+        avg_delivery_delay_days,
+        CASE
+            WHEN avg_delivery_delay_days <= 0 THEN 'Early / On Time'
+            WHEN avg_delivery_delay_days <= 3 THEN 'Slight Delay (1–3 days)'
+            WHEN avg_delivery_delay_days <= 7 THEN 'Moderate Delay (4–7 days)'
+            ELSE 'Severe Delay (8+ days)'
+        END AS delivery_delay_bucket
+    FROM seller_delay
+)
+SELECT
+    delivery_delay_bucket,
+    COUNT(*) AS num_sellers
+FROM bucketed_sellers
+GROUP BY delivery_delay_bucket
+ORDER BY num_sellers DESC;
+")
+```
+
+```{r}
+ddelays_repeat_customers <-dbGetQuery(con,"
+WITH customer_repeat AS (
+    SELECT
+        c.customer_unique_id,
+        COUNT(o.order_id) AS total_orders,
+        CASE WHEN COUNT(o.order_id) > 1 THEN 1 ELSE 0 END AS is_repeat_customer
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.customer_id
+    GROUP BY c.customer_unique_id
+),
+customer_worst_delay AS (
+    SELECT
+        c.customer_unique_id,
+        MAX(EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_estimated_delivery_date))/86400) AS worst_delay_days
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.customer_id
+    WHERE o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+    GROUP BY c.customer_unique_id
+),
+customer_bucket AS (
+    SELECT
+        cwd.customer_unique_id,
+        CASE
+            WHEN cwd.worst_delay_days <= 0 THEN 'Early / On Time'
+            WHEN cwd.worst_delay_days <= 3 THEN 'Slight Delay'
+            WHEN cwd.worst_delay_days <= 7 THEN 'Moderate Delay'
+            ELSE 'Severe Delay'
+        END AS delay_bucket
+    FROM customer_worst_delay cwd
+)
+SELECT
+    cb.delay_bucket,
+    COUNT(*) AS total_customers,
+    SUM(cr.is_repeat_customer) AS repeat_customers,
+    ROUND(SUM(cr.is_repeat_customer)::numeric / COUNT(*) * 100, 2) AS repeat_rate_percent
+FROM customer_bucket cb
+JOIN customer_repeat cr
+    ON cb.customer_unique_id = cr.customer_unique_id
+GROUP BY cb.delay_bucket
+ORDER BY repeat_rate_percent DESC;
+")
+```
+
+```{r}
+ddelays_rscores <-dbGetQuery(con,"
+                             WITH order_delay AS (
+    SELECT
+        o.order_id,
+        r.review_score,
+        EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_estimated_delivery_date)) / 86400 AS delay_days,
+        CASE
+            WHEN EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_estimated_delivery_date)) / 86400 <= 0 THEN 'On Time / Early'
+            WHEN EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_estimated_delivery_date)) / 86400 <= 3 THEN 'Slight Delay (1–3 days)'
+            WHEN EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_estimated_delivery_date)) / 86400 <= 7 THEN 'Moderate Delay (4–7 days)'
+            ELSE 'Severe Delay (8+ days)'
+        END AS delay_bucket
+    FROM orders o
+    JOIN order_reviews r
+        ON o.order_id = r.order_id
+    WHERE o.order_delivered_customer_date IS NOT NULL
+      AND o.order_estimated_delivery_date IS NOT NULL
+      AND r.review_score IS NOT NULL
+)
+SELECT
+    delay_bucket,
+    COUNT(*) AS num_orders,
+    ROUND(AVG(review_score)::numeric, 2) AS avg_review_score,
+    ROUND(PERCENTILE_CONT(0.5) WITHIN GROUP (ORDER BY review_score)::numeric, 2) AS median_review_score
+FROM order_delay
+GROUP BY delay_bucket
+ORDER BY MIN(delay_days);
+")
+```
+
+```{r}
+customer_repeat <- dbGetQuery(con, "
+             WITH customer_repeat AS (
+    SELECT
+        c.customer_unique_id,
+        CASE WHEN COUNT(o.order_id) > 1 THEN 1 ELSE 0 END AS repeat_customer
+    FROM orders o
+    JOIN customers c ON o.customer_id = c.customer_id
+    GROUP BY c.customer_unique_id
+)
+SELECT
+    o.order_id,
+    c.customer_unique_id,
+    EXTRACT(EPOCH FROM (o.order_delivered_customer_date - o.order_estimated_delivery_date)) / 86400 AS delay_days,
+    orv.review_score,
+    cr.repeat_customer
+FROM orders o
+JOIN customers c ON o.customer_id = c.customer_id
+JOIN order_reviews orv ON o.order_id = orv.order_id
+JOIN customer_repeat cr ON c.customer_unique_id = cr.customer_unique_id
+WHERE o.order_delivered_customer_date IS NOT NULL
+  AND o.order_estimated_delivery_date IS NOT NULL
+  AND orv.review_score IS NOT NULL;
+")
+```
+
+```{r}
+library(tidyverse)
+```
+
+```{r}
+plasma_subset <- viridis::plasma(100)[1:75]  # takes the first 85% of the gradient
+
+ggplot(satisfaction_repeat, 
+       aes(x = review_score, 
+           y = repeat_rate_percent, 
+           size = total_customers, 
+           color = repeat_rate_percent)) +
+  geom_point(alpha = 0.7) +
+  geom_text(aes(label = total_customers), 
+            vjust = -2.5, size = 3) +
+  scale_size_continuous(range = c(3, 12)) +
+  scale_color_gradientn(colors = plasma_subset) +  # custom plasma without bright yellow
+  scale_y_continuous(limits = c(0, max(satisfaction_repeat$repeat_rate_percent) * 1.2)) +
+  labs(
+    title = "Repeat Rate Shows Minimal Variation by Review Score",
+    x = "Review Score",
+    y = "Repeat Rate (%)",
+    size = "Total Customers",
+    color = "Repeat Rate (%)"
+  ) +
+  theme_minimal() +
+  theme(plot.title = element_text(face = "bold", size = 14))
+
+
+
+```
+
+This visualization examines the relationship between review score (1–5) and customer repeat rate, with bubble size representing total customers in each review category.
+
+At a high level, repeat rate shows minimal variation across review scores. Repeat behavior ranges from approximately 6.1% to 7.4%, indicating only about a 1.3 percentage point spread between the lowest and highest categories. While 5-star reviews have the highest repeat rate (\~7.4%), 1-star and 3-star reviews are not substantially lower (\~6.7–6.8%), and 4-star reviews actually show a slightly lower repeat rate (\~6.1%) than several lower-rated categories.
+
+Importantly, customer volume is heavily concentrated among 5-star reviews (55,403 customers), which is visually evident from the substantially larger bubble. This class imbalance suggests that most repeat customers numerically come from the 5-star segment, but the probability of repeat purchase does not differ dramatically across satisfaction levels.
+
+```{r}
+library(lubridate)
+
+bstates_delay$avg_delivery_delay_days <- sapply(bstates_delay$avg_delivery_delay, function(x) {
+  parts <- strsplit(x, " ")[[1]]
+  days <- as.numeric(parts[1])
+  if(length(parts) > 2){  # has HH:MM:SS
+    hms_time <- hms(parts[3])  # lubridate hms
+    days <- days + hour(hms_time)/24 + minute(hms_time)/1440 + second(hms_time)/86400
+  }
+  return(days)
+})
+```
+
+```{r}
+ggplot(bstates_delay, aes(x = avg_delivery_delay_days, y = reorder(seller_state, -avg_delivery_delay_days))) +
+  geom_point(size = 3, color = "#fc8d62") +
+  geom_text(aes(label = round(avg_delivery_delay_days, 1)), hjust = -0.3, size = 3) +
+  labs(
+    title = "Environmental and Strategic Factors Drive State-Level Delivery Delays",
+    x = "Average Delivery Delay (days)",
+    y = "State"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14)
+  ) +
+  expand_limits(x = max(bstates_delay$avg_delivery_delay_days) * 1.1)
+
+
+```
+
+This visualization shows the average delivery delay (in days) by seller state, highlighting substantial geographic variation in fulfillment performance.
+
+Most states exhibit negative average delay values, meaning deliveries typically arrive earlier than the estimated date. For example, RO (-23.9 days) and PB (-19 days) show the largest early delivery averages, suggesting either conservative delivery estimates or operational efficiency in those regions. The majority of states cluster between approximately -10 and -16 days, indicating consistently early fulfillment across much of the network.
+
+In contrast, AM stands out as a clear outlier with a positive average delay (+9.3 days), meaning deliveries arrive later than estimated. This sharp deviation suggests potential structural challenges such as logistics infrastructure, geographic remoteness, or supply chain constraints.
+
+Overall, the distribution indicates that delivery performance is not uniform across states. While early delivery appears to be the norm, a small number of regions drive meaningful variation, which may warrant targeted operational analysis.
+
+```{r}
+seller_delay$delivery_delay_bucket <- factor(
+  seller_delay$delivery_delay_bucket,
+  levels = c("Early / On Time", "Slight Delay (1–3 days)", "Moderate Delay (4–7 days)", "Severe Delay (8+ days)")
+)
+
+
+
+ggplot(seller_delay,
+       aes(x = delivery_delay_bucket, y = num_sellers)) +
+  geom_col(width = 0.6, fill = "#69b3a2") +
+  geom_text(aes(label = paste0("n = ", num_sellers)),
+            vjust = -0.5,
+            size = 4) +
+  labs(
+    title = "Seller Delivery Delays Could Impact Customer Satisfaction: Few Severe Cases",
+    x = "Delivery Delay",
+    y = "# of Sellers"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 12.5)
+  )+
+  expand_limits(y = max(seller_delay$num_sellers) * 1.1)
+
+```
+
+This chart shows the distribution of sellers across delivery delay buckets, highlighting a highly skewed performance profile.
+
+The vast majority of sellers (n = 2,867) deliver early or on time. In contrast, only a small fraction fall into delay categories: 28 sellers with slight delays (1–3 days), 32 with moderate delays (4–7 days), and 43 with severe delays (8+ days). Combined, delayed sellers represent a very small percentage of the total seller base.
+
+This distribution indicates that late delivery is not a systemic issue but rather concentrated among a small subset of sellers. From a business perspective, this suggests that overall fulfillment performance is strong, and targeted interventions focused on the relatively small group of delayed sellers could meaningfully improve customer experience without requiring broad operational changes.
+
+```{r}
+ddelays_repeat_customers$delay_bucket <- factor(
+  ddelays_repeat_customers$delay_bucket,
+  levels = c(
+    "Early / On Time",
+    "Slight Delay",
+    "Moderate Delay",
+    "Severe Delay"
+  )
+)
+
+ggplot(ddelays_repeat_customers,
+       aes(x = delay_bucket, y = repeat_rate_percent)) +
+  geom_col(width = 0.6, fill = "#9467bd") +
+  geom_text(aes(label = paste0("n = ", total_customers)),
+            vjust = -0.5,
+            size = 4) +
+  labs(
+    title = "The 'Power User' effect: Why delays aren't hurting repeat rates",
+    x = "Worst Delivery Delay Experienced",
+    y = "Repeat Rate (%)"
+  ) +
+  theme_minimal() +
+  expand_limits(y = max(ddelays_repeat_customers$repeat_rate_percent) * 1.15) +
+  theme(
+    plot.title = element_text(face = "bold", size = 14),
+    axis.text.x = element_text(angle = 20, hjust = 1)
+  )
+
+```
+
+The provided chart illustrates a positive correlation between worst delivery delay severity experienced and customer repeat rates. While the "Early / On Time" cohort (n = 85,584) maintains a baseline repeat rate of approximately 3%, the "Severe Delay" cohort (n = 3,327) surprisingly shows the highest retention at over 5%. This anomaly suggests a potential survivorship bias, where high-frequency power users are statistically more likely to eventually encounter a severe delay.
+
+```{r}
+#Q3 Are customers with delayed deliveries statistically less likely to become repeat buyers?
+Q3 <- table(ddelays_repeat_customers$delay_bucket, ddelays_repeat_customers$repeat_customers)
+Q3
+chisq.test(Q3)
+
+```
+
+My p-value is not statistically significant, so therefore becoming a repeat customer does not differ significantly across delay buckets. I did get a warning in this case that chi-squared approximation may be incorrect, so we will follow that up with Fisher's exact test that works with small cell counts.
+
+```{r}
+fisher.test(Q3)
+```
+
+This basically says the data shows no significant association between delivery delay and repeat purchase. using delivery delays as numeric and not bucketed in logistic regression could provide more nuanced insights.
+
+```{r}
+glm(repeat_customer ~ delay_days, 
+    data = customer_repeat, 
+    family = binomial)
+```
+
+Logistic regression results show that delivery delays negatively impact repeat purchasing behavior. If the delivery is on time, the predicted repeat probability is about 6.1%. Each additional day of delay reduces the odds of repeat purchase by about 0.85% per day. This is statistically significant given the large sample size, but the effect size is modest. Therefore, delivery speed contributes to retention but is not the sole driver.
+
+```{r}
+ddelays_rscores$delay_bucket <- factor(
+  ddelays_rscores$delay_bucket,
+  levels = c(
+    "On Time / Early",
+    "Slight Delay (1–3 days)",
+    "Moderate Delay (4–7 days)",
+    "Severe Delay (8+ days)"
+  )
+)
+
+
+
+ggplot(ddelays_rscores,
+       aes(x = delay_bucket, y = avg_review_score, group = 1)) +
+  geom_line() +
+  geom_point(size = 3) +
+  labs(
+    title = "Average Review Score Declines as Delivery Delays Increase",
+    x = "Delivery Delay Severity",
+    y = "Average Review Score"
+  ) +
+  theme_minimal() +
+  theme(
+    plot.title = element_text(face = "bold", size = 14)
+  )
+```
+
+When grouped into delivery delay buckets, customers experiencing severe delays show visibly lower repeat rates and review scores. However, we will review hypothesis test results and regression analysis to dig into this more precisely.
+
+```{r}
+#Q4 How exactly do delivery days influence review scores? Is there a "breaking point" where satisfaction drops significantly?
+
+kruskal.test(avg_review_score ~ delay_bucket, data = ddelays_rscores)
+```
+
+Since review scores are ordinal (1-5), I used Kruskal-Wallis test to compare distributions across delay buckets. The results showed there is no statistically significant difference in review scores across delivery delay buckets, so satisfaction does not differ enough between groups to be statistically meaningful. There is no sharp drop, but could be a continuous drop. I will check correlation.
+
+```{r}
+#Correlation of delivery delays and repeat customers
+cor(customer_repeat$delay_days, customer_repeat$review_score, method = "spearman")
+```
+
+I chose to use Spearman correlation instead of Pearson because delivery delays and review scores are not necessarily normally distributed and the relationship might not be strictly linear. This correlation score means that as delay days increase, review scores tend to decrease but it is a weak relationship (small effect).
+
+```{r}
+#linear regression of repeat customers and delivery delays
+lm_review <- lm(review_score ~ delay_days, data = customer_repeat)
+summary(lm_review)
+```
+
+Finally, I ran linear regression to quantify the effect of each additional day of delay on review score and assess statistical significance. Linear regression shows that each additional day of delivery delay reduces review scores by \~0.034 points (p \< 0.001). Although the effect is statistically significant, delivery delay explains only \~7% of the variation in customer ratings, indicating that other factors also influence satisfaction. For example, a 10-day delay would reduce the predicted review by \~0.34 points on average.
+
+So thinking back to the visual that was more high-level, the visual showed more exaggerated results.
