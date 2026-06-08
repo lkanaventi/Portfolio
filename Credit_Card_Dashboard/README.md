@@ -26,7 +26,7 @@ Through mixed-methods usability testing, the platform design was iterated from a
 
 ### 1. Mixed-Methods UX Architecture
 * **Qualitative Baseline:** Led 12 cross-device remote moderated usability sessions (6 mobile, 6 desktop) evaluating high-friction workflows including security card visibility, account navigation, and card-locking modal logic.
-* **Component Optimization:** Refined interface taxonomy, micro-copy, and modal layout constraints to create a unified, reusable component library.
+* **Component Optimization:** The team refined interface taxonomy, micro-copy, and modal layout constraints to create a unified, reusable component library.
 
 ### 2. Post-Project Quantitative Validation
 * **Data Reconstruction:** Developed a custom distribution algorithm (`generate_constrained_scores`) to back-engineer granular, user-level metrics from aggregated sample means while preserving mathematical variation.
